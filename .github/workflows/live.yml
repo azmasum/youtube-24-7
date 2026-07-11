@@ -31,7 +31,7 @@ jobs:
           fi
           ls -lh video.mp4
 
-      - name: Start Stream - Top Middle Animated
+      - name: Start Stream Animated Top Middle
         env:
           YT_KEY: ${{ secrets.YT_KEY }}
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
@@ -41,6 +41,6 @@ jobs:
           POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g")
           FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
           cat > /tmp/f.txt <<EOF
-          scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=20:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT:text='LIVE':x=30:y=24:fontcolor=white:fontsize=18,drawtext=fontfile=$FONT:text='$POPUP':x=(w-tw)/2:y=28:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.75:boxborderw=12:alpha=0.75+0.25*sin(2*PI*t*1.5):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=$FONT:text='$SCROLL':x=w-mod(90*t\\,w+tw):y=640:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
+          scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=20:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT:text='LIVE':x=30:y=24:fontcolor=white:fontsize=18,drawtext=fontfile=$FONT:text='$POPUP':x=(w-tw)/2:y=28:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.75:boxborderw=12:alpha=0.75+0.25*sin(2*PI*t*1.5):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=$FONT:text='$SCROLL':x=w-mod(90*t\,w+tw):y=640:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
           EOF
           ffmpeg -re -stream_loop -1 -i video.mp4 -vf "$(cat /tmp/f.txt)" -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
