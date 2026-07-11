@@ -15,18 +15,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg python3-pip
-          pip3 install gdown yt-dlp
+          pip3 install --upgrade gdown yt-dlp
 
       - name: Download Video File
         env:
           VIDEO_URL: ${{ secrets.VIDEO_URL }}
         run: |
           echo "Downloading from $VIDEO_URL"
-          # Google Drive হলে gdown দিয়ে ডাউনলোড করবে
           if echo "$VIDEO_URL" | grep -q "drive.google"; then
             FILEID=$(echo "$VIDEO_URL" | grep -oE 'id=[^&]+' | cut -d= -f2)
             if [ -z "$FILEID" ]; then FILEID=$(echo "$VIDEO_URL" | grep -oE '/d/[^/]+' | cut -d'/' -f3); fi
-            gdown --id "$FILEID" -O video.mp4
+            echo "File ID is: $FILEID"
+            # ফিক্স: --id ফ্ল্যাগ বাদ দিয়ে সরাসরি লিংক
+            gdown "https://drive.google.com/uc?id=$FILEID" -O video.mp4 || gdown "$FILEID" -O video.mp4
           else
             yt-dlp -o video.mp4 "$VIDEO_URL" || curl -L -o video.mp4 "$VIDEO_URL"
           fi
@@ -39,10 +40,9 @@ jobs:
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
           POPUP_TEXT: ${{ secrets.POPUP_TEXT }}
         run: |
-          SCROLL="${SCROLL_TEXT:-SUBSCRIBE NOW - Azma Sums Official - LIVE 24/7}"
+          SCROLL="${SCROLL_TEXT:-SUBSCRIBE KORUN - Azma Sums Official}"
           POPUP="${POPUP_TEXT:-LIVE}"
           FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-
           ffmpeg -re -stream_loop -1 -i video.mp4 \
           -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=20:w=90:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT:text='$POPUP':x=30:y=24:fontcolor=white:fontsize=20,drawtext=fontfile=$FONT:text='$SCROLL':x=w-80*t:y=640:fontcolor=yellow:fontsize=24:box=1:boxcolor=black@0.5:boxborderw=6" \
           -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
