@@ -11,38 +11,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
-      - name: Install FFmpeg and Tools
+      - name: Install Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg python3-pip
           pip3 install --upgrade gdown yt-dlp
 
-      - name: Download Video File
+      - name: Download Video
         env:
           VIDEO_URL: ${{ secrets.VIDEO_URL }}
         run: |
-          echo "Downloading from $VIDEO_URL"
           if echo "$VIDEO_URL" | grep -q "drive.google"; then
-            FILEID=$(echo "$VIDEO_URL" | grep -oE 'id=[^&]+' | cut -d= -f2)
-            if [ -z "$FILEID" ]; then FILEID=$(echo "$VIDEO_URL" | grep -oE '/d/[^/]+' | cut -d'/' -f3); fi
-            echo "File ID is: $FILEID"
-            # ফিক্স: --id ফ্ল্যাগ বাদ দিয়ে সরাসরি লিংক
-            gdown "https://drive.google.com/uc?id=$FILEID" -O video.mp4 || gdown "$FILEID" -O video.mp4
+            FILEID=$(echo "$VIDEO_URL" | grep -oE 'id=[^&]+' | cut -d= -f2); [ -z "$FILEID" ] && FILEID=$(echo "$VIDEO_URL" | grep -oE '/d/[^/]+' | cut -d'/' -f3)
+            gdown "https://drive.google.com/uc?id=$FILEID" -O video.mp4
           else
             yt-dlp -o video.mp4 "$VIDEO_URL" || curl -L -o video.mp4 "$VIDEO_URL"
           fi
           ls -lh video.mp4
-          ffprobe video.mp4
 
-      - name: Start 24-7 Loop Stream
+      - name: Start Stream - Fixed English Overlay
         env:
           YT_KEY: ${{ secrets.YT_KEY }}
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
           POPUP_TEXT: ${{ secrets.POPUP_TEXT }}
         run: |
-          SCROLL="${SCROLL_TEXT:-SUBSCRIBE KORUN - Azma Sums Official}"
+          SCROLL="${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}"
           POPUP="${POPUP_TEXT:-LIVE}"
-          FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-          ffmpeg -re -stream_loop -1 -i video.mp4 \
-          -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=20:w=90:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT:text='$POPUP':x=30:y=24:fontcolor=white:fontsize=20,drawtext=fontfile=$FONT:text='$SCROLL':x=w-80*t:y=640:fontcolor=yellow:fontsize=24:box=1:boxcolor=black@0.5:boxborderw=6" \
-          -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
+          # স্পেশাল ক্যারেক্টার ' থাকলে সরিয়ে দাও, না হলে FFmpeg ভাঙবে
+          SCROLL=$(echo "$SCROLL" | sed "s/'//g")
+          POPUP=$(echo "$POPUP" | sed "s/'//g")
+
+          # ফিল্টার ফাইলে লেখো, যাতে \, নষ্ট না হয়
+          cat > /tmp/f.txt <<EOF
+          scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=w-110:y=20:w=90:h=34:color=red@0.9:t=fill,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='$POPUP':x=w-102:y=24:fontcolor=white:fontsize=20,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='$SCROLL':x=w-mod(80*t\\,w+tw):y=620:fontcolor=yellow:fontsize=28:box=1:boxcolor=black@0.6:boxborderw=8
+          EOF
+          cat /tmp/f.txt
+          ffmpeg -re -stream_loop -1 -i video.mp4 -vf "$(cat /tmp/f.txt)" -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
