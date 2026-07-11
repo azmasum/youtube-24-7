@@ -12,9 +12,11 @@ jobs:
     timeout-minutes: 350
     steps:
       - name: Install Tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-core
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-core
 
-      - name: Select Video by Time (Dhaka)
+      - name: Pick Video by Dhaka Time
         id: picker
         env:
           VIDEO_URL: ${{ secrets.VIDEO_URL }}
@@ -24,37 +26,23 @@ jobs:
         run: |
           export TZ='Asia/Dhaka'
           HOUR=$(date +%H)
-          echo "Current Hour in Dhaka: $HOUR"
-          if [ "$HOUR" -ge 05 ] && [ "$HOUR" -lt 12 ]; then
-            PICKED="${MORNING_URL:-$VIDEO_URL}"
-            echo "Slot: MORNING"
-          elif [ "$HOUR" -ge 12 ] && [ "$HOUR" -lt 18 ]; then
-            PICKED="${DAY_URL:-$VIDEO_URL}"
-            echo "Slot: DAY"
-          elif [ "$HOUR" -ge 18 ] && [ "$HOUR" -lt 22 ]; then
-            PICKED="${DAY_URL:-$VIDEO_URL}"
-            echo "Slot: EVENING"
-          else
-            PICKED="${NIGHT_URL:-$VIDEO_URL}"
-            echo "Slot: NIGHT"
-          fi
+          if [ "$HOUR" -ge 05 ] && [ "$HOUR" -lt 12 ]; then PICKED="${MORNING_URL:-$VIDEO_URL}"
+          elif [ "$HOUR" -ge 18 ] || [ "$HOUR" -lt 05 ]; then PICKED="${NIGHT_URL:-$VIDEO_URL}"
+          else PICKED="${DAY_URL:-$VIDEO_URL}"; fi
           echo "video=$PICKED" >> $GITHUB_OUTPUT
 
-      - name: Start Stream with Loop and Effects
+      - name: Start Loop Stream
         env:
           YT_KEY: ${{ secrets.YT_KEY }}
           PICKED_URL: ${{ steps.picker.outputs.video }}
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
           POPUP_TEXT: ${{ secrets.POPUP_TEXT }}
         run: |
-          SCROLL="${SCROLL_TEXT:-🔴 LIVE - সাবস্ক্রাইব করুন - Azma Sums Official}"
-          POPUP="${POPUP_TEXT:-SUBSCRIBE NOW}"
+          SCROLL="${SCROLL_TEXT:-SUBSCRIBE KORUN - Azma Sums Official}"
+          POPUP="${POPUP_TEXT:-LIVE NOW}"
           FONT_BN="/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf"
           FONT_EN="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
-          echo "Now Playing: $PICKED_URL"
-
-          ffmpeg -re -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 \
-          -stream_loop -1 -i "$PICKED_URL" \
-          -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p,drawbox=x=20:y=20:w=88:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT_EN:text='LIVE':x=32:y=24:fontcolor=white:fontsize=20,drawtext=fontfile=$FONT_BN:text='%{localtime\\:%d %B %I\\\\\\:%M %p}':x=20:y=680:fontcolor=white:fontsize=18:box=1:boxcolor=black@0.6:boxborderw=6,drawtext=fontfile=$FONT_BN:text='$POPUP':x=(w-tw)/2:y=120:fontcolor=white:fontsize=36:box=1:boxcolor=black@0.7:boxborderw=12:alpha='if(lt(mod(t\\,8)\\,1)\\,0\\,if(lt(mod(t\\,8)\\,2)\\,(mod(t\\,8)-1)\\,if(lt(mod(t\\,8)\\,6)\\,1\\,if(lt(mod(t\\,8)\\,7)\\,7-mod(t\\,8)\\,0))))',drawtext=fontfile=$FONT_BN:text='$SCROLL':x=w-mod(t*100\\,w+tw):y=620:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.6:boxborderw=8" \
-          -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -c:a aac -b:a 128k -ar 44100 -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
+          ffmpeg -re -stream_loop -1 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 -i "$PICKED_URL" \
+          -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p,drawbox=x=20:y=20:w=88:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT_EN:text='LIVE':x=32:y=24:fontcolor=white:fontsize=20,drawtext=fontfile=$FONT_BN:text='$POPUP':x=(w-tw)/2:y=100:fontcolor=white:fontsize=32:box=1:boxcolor=black@0.6:boxborderw=10,drawtext=fontfile=$FONT_BN:text='$SCROLL':x=w-90*t:y=620:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.6:boxborderw=8" \
+          -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
