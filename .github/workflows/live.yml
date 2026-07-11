@@ -2,20 +2,22 @@ name: 24-7-Live-Pro-Final
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *'
-  push:
-    branches: [ main ]
+    - cron: '0 */5 * * *'  # প্রতি ৫ ঘণ্টা পর পর অটো রিস্টার্ট
+
+concurrency:
+  group: youtube-live
+  cancel-in-progress: true
 
 jobs:
   live:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 120  # <-- এটাই লাইভের মোট টাইম, 350 = 5 ঘণ্টা 50 মিনিট
     steps:
       - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg python3-pip
-          pip3 install --upgrade gdown yt-dlp
+          sudo apt-get install -y ffmpeg python3-pip fonts-noto-core
+          pip3 install --upgrade gdown yt-dlp google-api-python-client google-auth google-auth-oauthlib
 
       - name: Download Video
         env:
@@ -29,21 +31,47 @@ jobs:
           fi
           ls -lh video.mp4
 
-      - name: Start Stream - Fixed English Overlay
+      - name: Update Title Description Tags (Optional)
+        if: ${{ secrets.YT_CLIENT_ID != '' }}
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          YT_TITLE: ${{ secrets.YT_TITLE }}
+          YT_DESCRIPTION: ${{ secrets.YT_DESCRIPTION }}
+          YT_TAGS: ${{ secrets.YT_TAGS }}
+        run: |
+          python3 << 'PY'
+          import os
+          from google.oauth2.credentials import Credentials
+          from googleapiclient.discovery import build
+          import google.auth.transport.requests
+          CID=os.environ['YT_CLIENT_ID']; CSEC=os.environ['YT_CLIENT_SECRET']; REF=os.environ['YT_REFRESH_TOKEN']
+          TITLE=os.environ.get('YT_TITLE','24/7 LIVE - Please Subscribe')
+          DESC=os.environ.get('YT_DESCRIPTION','Welcome to our 24/7 live stream. Like Comment Subscribe.')
+          TAGS=[t.strip() for t in os.environ.get('YT_TAGS','live,24/7,subscribe').split(',') if t.strip()]
+          creds=Credentials(None, refresh_token=REF, token_uri='https://oauth2.googleapis.com/token', client_id=CID, client_secret=CSEC, scopes=['https://www.googleapis.com/auth/youtube.force-ssl'])
+          creds.refresh(google.auth.transport.requests.Request())
+          yt=build('youtube','v3',credentials=creds)
+          b=yt.liveBroadcasts().list(part='id,snippet', broadcastStatus='active', maxResults=2).execute()
+          if not b['items']: b=yt.liveBroadcasts().list(part='id,snippet', broadcastStatus='upcoming', maxResults=2).execute()
+          if b['items']:
+            bid=b['items'][0]['id']; sn=b['items'][0]['snippet']; sn['title']=TITLE; sn['description']=DESC; sn['tags']=TAGS
+            yt.liveBroadcasts().update(part='snippet', body={'id':bid,'snippet':sn}).execute()
+            print(f"Updated {bid}")
+          else: print("No active broadcast")
+          PY
+
+      - name: Start Stream with Animated Top Middle Text
         env:
           YT_KEY: ${{ secrets.YT_KEY }}
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
           POPUP_TEXT: ${{ secrets.POPUP_TEXT }}
         run: |
-          SCROLL="${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}"
-          POPUP="${POPUP_TEXT:-LIVE}"
-          # স্পেশাল ক্যারেক্টার ' থাকলে সরিয়ে দাও, না হলে FFmpeg ভাঙবে
-          SCROLL=$(echo "$SCROLL" | sed "s/'//g")
-          POPUP=$(echo "$POPUP" | sed "s/'//g")
-
-          # ফিল্টার ফাইলে লেখো, যাতে \, নষ্ট না হয়
+          SCROLL=$(echo "${SCROLL_TEXT:-WELCOME TO AZMA SUMS OFFICIAL - SUBSCRIBE NOW}" | sed "s/'//g")
+          POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g")
+          FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
           cat > /tmp/f.txt <<EOF
-          scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=w-110:y=20:w=90:h=34:color=red@0.9:t=fill,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='$POPUP':x=w-102:y=24:fontcolor=white:fontsize=20,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='$SCROLL':x=w-mod(80*t\\,w+tw):y=620:fontcolor=yellow:fontsize=28:box=1:boxcolor=black@0.6:boxborderw=8
+          scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=20:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT:text='LIVE':x=30:y=24:fontcolor=white:fontsize=18,drawtext=fontfile=$FONT:text='$POPUP':x=(w-tw)/2:y=28:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.75:boxborderw=12:alpha=0.75+0.25*sin(2*PI*t*1.5):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=$FONT:text='$SCROLL':x=w-mod(90*t\\,w+tw):y=640:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
           EOF
-          cat /tmp/f.txt
           ffmpeg -re -stream_loop -1 -i video.mp4 -vf "$(cat /tmp/f.txt)" -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
