@@ -11,38 +11,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
-      - name: Install Tools
+      - name: Install FFmpeg and Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core
+          sudo apt-get install -y ffmpeg python3-pip
+          pip3 install gdown yt-dlp
 
-      - name: Pick Video by Dhaka Time
-        id: picker
+      - name: Download Video File
         env:
           VIDEO_URL: ${{ secrets.VIDEO_URL }}
-          MORNING_URL: ${{ secrets.MORNING_URL }}
-          DAY_URL: ${{ secrets.DAY_URL }}
-          NIGHT_URL: ${{ secrets.NIGHT_URL }}
         run: |
-          export TZ='Asia/Dhaka'
-          HOUR=$(date +%H)
-          if [ "$HOUR" -ge 05 ] && [ "$HOUR" -lt 12 ]; then PICKED="${MORNING_URL:-$VIDEO_URL}"
-          elif [ "$HOUR" -ge 18 ] || [ "$HOUR" -lt 05 ]; then PICKED="${NIGHT_URL:-$VIDEO_URL}"
-          else PICKED="${DAY_URL:-$VIDEO_URL}"; fi
-          echo "video=$PICKED" >> $GITHUB_OUTPUT
+          echo "Downloading from $VIDEO_URL"
+          # Google Drive হলে gdown দিয়ে ডাউনলোড করবে
+          if echo "$VIDEO_URL" | grep -q "drive.google"; then
+            FILEID=$(echo "$VIDEO_URL" | grep -oE 'id=[^&]+' | cut -d= -f2)
+            if [ -z "$FILEID" ]; then FILEID=$(echo "$VIDEO_URL" | grep -oE '/d/[^/]+' | cut -d'/' -f3); fi
+            gdown --id "$FILEID" -O video.mp4
+          else
+            yt-dlp -o video.mp4 "$VIDEO_URL" || curl -L -o video.mp4 "$VIDEO_URL"
+          fi
+          ls -lh video.mp4
+          ffprobe video.mp4
 
-      - name: Start Loop Stream
+      - name: Start 24-7 Loop Stream
         env:
           YT_KEY: ${{ secrets.YT_KEY }}
-          PICKED_URL: ${{ steps.picker.outputs.video }}
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
           POPUP_TEXT: ${{ secrets.POPUP_TEXT }}
         run: |
-          SCROLL="${SCROLL_TEXT:-SUBSCRIBE KORUN - Azma Sums Official}"
-          POPUP="${POPUP_TEXT:-LIVE NOW}"
-          FONT_BN="/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf"
-          FONT_EN="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+          SCROLL="${SCROLL_TEXT:-SUBSCRIBE NOW - Azma Sums Official - LIVE 24/7}"
+          POPUP="${POPUP_TEXT:-LIVE}"
+          FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
-          ffmpeg -re -stream_loop -1 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 -i "$PICKED_URL" \
-          -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p,drawbox=x=20:y=20:w=88:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT_EN:text='LIVE':x=32:y=24:fontcolor=white:fontsize=20,drawtext=fontfile=$FONT_BN:text='$POPUP':x=(w-tw)/2:y=100:fontcolor=white:fontsize=32:box=1:boxcolor=black@0.6:boxborderw=10,drawtext=fontfile=$FONT_BN:text='$SCROLL':x=w-90*t:y=620:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.6:boxborderw=8" \
+          ffmpeg -re -stream_loop -1 -i video.mp4 \
+          -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=20:w=90:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT:text='$POPUP':x=30:y=24:fontcolor=white:fontsize=20,drawtext=fontfile=$FONT:text='$SCROLL':x=w-80*t:y=640:fontcolor=yellow:fontsize=24:box=1:boxcolor=black@0.5:boxborderw=6" \
           -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
