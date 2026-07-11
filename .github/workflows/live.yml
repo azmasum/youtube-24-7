@@ -2,7 +2,7 @@ name: 24-7-Live-Pro-Final
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *'  # প্রতি ৫ ঘণ্টা পর পর অটো রিস্টার্ট
+    - cron: '0 */5 * * *'
 
 concurrency:
   group: youtube-live
@@ -11,7 +11,7 @@ concurrency:
 jobs:
   live:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # <-- এটাই লাইভের মোট টাইম, 350 = 5 ঘণ্টা 50 মিনিট
+    timeout-minutes: 120
     steps:
       - name: Install Tools
         run: |
@@ -31,8 +31,7 @@ jobs:
           fi
           ls -lh video.mp4
 
-      - name: Update Title Description Tags (Optional)
-        if: ${{ secrets.YT_CLIENT_ID != '' }}
+      - name: Update Title Description Tags
         env:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
@@ -41,6 +40,7 @@ jobs:
           YT_DESCRIPTION: ${{ secrets.YT_DESCRIPTION }}
           YT_TAGS: ${{ secrets.YT_TAGS }}
         run: |
+          if [ -z "$YT_CLIENT_ID" ]; then echo "Skipping title update - no API keys set"; exit 0; fi
           python3 << 'PY'
           import os
           from google.oauth2.credentials import Credentials
@@ -48,8 +48,8 @@ jobs:
           import google.auth.transport.requests
           CID=os.environ['YT_CLIENT_ID']; CSEC=os.environ['YT_CLIENT_SECRET']; REF=os.environ['YT_REFRESH_TOKEN']
           TITLE=os.environ.get('YT_TITLE','24/7 LIVE - Please Subscribe')
-          DESC=os.environ.get('YT_DESCRIPTION','Welcome to our 24/7 live stream. Like Comment Subscribe.')
-          TAGS=[t.strip() for t in os.environ.get('YT_TAGS','live,24/7,subscribe').split(',') if t.strip()]
+          DESC=os.environ.get('YT_DESCRIPTION','Welcome to 24/7 live')
+          TAGS=[t.strip() for t in os.environ.get('YT_TAGS','live,24/7').split(',') if t.strip()]
           creds=Credentials(None, refresh_token=REF, token_uri='https://oauth2.googleapis.com/token', client_id=CID, client_secret=CSEC, scopes=['https://www.googleapis.com/auth/youtube.force-ssl'])
           creds.refresh(google.auth.transport.requests.Request())
           yt=build('youtube','v3',credentials=creds)
@@ -59,7 +59,6 @@ jobs:
             bid=b['items'][0]['id']; sn=b['items'][0]['snippet']; sn['title']=TITLE; sn['description']=DESC; sn['tags']=TAGS
             yt.liveBroadcasts().update(part='snippet', body={'id':bid,'snippet':sn}).execute()
             print(f"Updated {bid}")
-          else: print("No active broadcast")
           PY
 
       - name: Start Stream with Animated Top Middle Text
