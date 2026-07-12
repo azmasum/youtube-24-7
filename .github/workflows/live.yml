@@ -30,6 +30,8 @@ jobs:
             yt-dlp -o video.mp4 "$VIDEO_URL" || curl -L -o video.mp4 "$VIDEO_URL"
           fi
           ls -lh video.mp4
+          ffprobe -v error -select_streams v:0 -show_entries stream=width,height,codec_name -of default=nw=1 video.mp4 || true
+          ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1 video.mp4 || echo "No audio found"
 
       - name: Start Stream Animated Top Middle
         env:
@@ -40,7 +42,18 @@ jobs:
           SCROLL=$(echo "${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}" | sed "s/'//g")
           POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g")
           FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-          cat > /tmp/f.txt <<EOF
-          scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=20:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT:text='LIVE':x=30:y=24:fontcolor=white:fontsize=18,drawtext=fontfile=$FONT:text='$POPUP':x=(w-tw)/2:y=28:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.75:boxborderw=12:alpha=0.75+0.25*sin(2*PI*t*1.5):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=$FONT:text='$SCROLL':x=w-mod(90*t\,w+tw):y=640:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
-          EOF
-          ffmpeg -re -stream_loop -1 -i video.mp4 -vf "$(cat /tmp/f.txt)" -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
+          HAS_AUDIO=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 video.mp4 | wc -l)
+          if [ "$HAS_AUDIO" -eq 0 ]; then
+            echo "No audio detected, generating silent audio"
+            AUDIO_IN="-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100"
+            AUDIO_MAP="-map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest"
+          else
+            AUDIO_IN=""
+            AUDIO_MAP="-c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k"
+          fi
+          cat > /tmp/f.txt <<'FILTER'
+          scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=20:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='LIVE':x=30:y=24:fontcolor=white:fontsize=18,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='POPUP_PLACEHOLDER':x=(w-tw)/2:y=28:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.75:boxborderw=12:alpha=0.75+0.25*sin(2*PI*t*1.5):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='SCROLL_PLACEHOLDER':x=w-mod(90*t\,w+tw):y=640:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
+          FILTER
+          sed -i "s/POPUP_PLACEHOLDER/$POPUP/g; s/SCROLL_PLACEHOLDER/$SCROLL/g" /tmp/f.txt
+          cat /tmp/f.txt
+          ffmpeg -re -stream_loop -1 -i video.mp4 $AUDIO_IN -vf "$(cat /tmp/f.txt)" $AUDIO_MAP -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
