@@ -1,12 +1,12 @@
-name: 24-7-Live-Pro-Final
+name: 24-7-Live-Final-Fixed-Pos-V2
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 */5 * * *'
 
 concurrency:
-  group: youtube-live
-  cancel-in-progress: true
+  group: youtube-live-final
+  cancel-in-progress: false
 
 jobs:
   live:
@@ -30,30 +30,26 @@ jobs:
             yt-dlp -o video.mp4 "$VIDEO_URL" || curl -L -o video.mp4 "$VIDEO_URL"
           fi
           ls -lh video.mp4
-          ffprobe -v error -select_streams v:0 -show_entries stream=width,height,codec_name -of default=nw=1 video.mp4 || true
-          ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1 video.mp4 || echo "No audio found"
 
-      - name: Start Stream Animated Top Middle
+      - name: Start Stream
         env:
           YT_KEY: ${{ secrets.YT_KEY }}
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
           POPUP_TEXT: ${{ secrets.POPUP_TEXT }}
         run: |
-          SCROLL=$(echo "${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}" | sed "s/'//g")
-          POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g")
+          SCROLL=$(echo "${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}" | sed "s/'//g; s/:/ /g; s/|//g")
+          POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g; s/:/ /g; s/|//g")
           FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+          PROBE=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 video.mp4)
+          W=$(echo $PROBE | cut -d',' -f1); H=$(echo $PROBE | cut -d',' -f2)
+          if [ -z "$W" ]; then W=1280; H=720; fi
+          if [ "$H" -gt "$W" ]; then OUT_W=720; OUT_H=1280; SCROLL_Y=1220; POPUP_Y=120; LIVE_Y=70; echo "Vertical"; else OUT_W=1280; OUT_H=720; SCROLL_Y=640; POPUP_Y=32; LIVE_Y=22; echo "Horizontal"; fi
+          LIVE_Y2=$((LIVE_Y+6))
           HAS_AUDIO=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 video.mp4 | wc -l)
-          if [ "$HAS_AUDIO" -eq 0 ]; then
-            echo "No audio detected, generating silent audio"
-            AUDIO_IN="-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100"
-            AUDIO_MAP="-map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest"
-          else
-            AUDIO_IN=""
-            AUDIO_MAP="-c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k"
-          fi
-          cat > /tmp/f.txt <<'FILTER'
-          scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=20:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='LIVE':x=30:y=24:fontcolor=white:fontsize=18,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='POPUP_PLACEHOLDER':x=(w-tw)/2:y=28:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.75:boxborderw=12:alpha=0.75+0.25*sin(2*PI*t*1.5):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='SCROLL_PLACEHOLDER':x=w-mod(90*t\,w+tw):y=640:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
-          FILTER
-          sed -i "s/POPUP_PLACEHOLDER/$POPUP/g; s/SCROLL_PLACEHOLDER/$SCROLL/g" /tmp/f.txt
+          if [ "$HAS_AUDIO" -eq 0 ]; then A_IN="-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100"; A_MAP="-map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest"; else A_IN=""; A_MAP="-c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k"; fi
+          cat > /tmp/f.txt <<'ENDOFFILTER'
+          scale=OUTW:OUTH:force_original_aspect_ratio=decrease,pad=OUTW:OUTH:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=18:y=__LIVEY__:w=86:h=34:color=red@1:t=fill,drawtext=fontfile=FONTFILE:text='LIVE':x=28:y=__LIVEY2__:fontcolor=white:fontsize=20,drawtext=fontfile=FONTFILE:text='POPUPTXT':x=(w-tw)/2:y=__POPUPY__:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.78:boxborderw=14:alpha=0.85+0.15*sin(2*PI*t*1.4):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=FONTFILE:text='SCROLLTXT':x=w-mod(90*t\,w+tw):y=__SCROLLY__:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.6:boxborderw=8
+          ENDOFFILTER
+          sed -i "s|__LIVEY2__|$LIVE_Y2|g; s|__LIVEY__|$LIVE_Y|g; s|__POPUPY__|$POPUP_Y|g; s|__SCROLLY__|$SCROLL_Y|g; s|OUTW|$OUT_W|g; s|OUTH|$OUT_H|g; s|FONTFILE|$FONT|g; s|POPUPTXT|$POPUP|g; s|SCROLLTXT|$SCROLL|g" /tmp/f.txt
           cat /tmp/f.txt
-          ffmpeg -re -stream_loop -1 -i video.mp4 $AUDIO_IN -vf "$(cat /tmp/f.txt)" $AUDIO_MAP -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
+          ffmpeg -re -stream_loop -1 -i video.mp4 $A_IN -vf "$(cat /tmp/f.txt)" $A_MAP -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
