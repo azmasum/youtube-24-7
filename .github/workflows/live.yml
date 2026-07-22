@@ -1,6 +1,6 @@
 name: 24-7-Live-Final-Fixed-Pos-V2
 on:
-  workflow_dispatch:
+#  workflow_dispatch:
 #  schedule:
 #    - cron: '0 */5 * * *'
 
